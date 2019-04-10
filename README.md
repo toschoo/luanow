@@ -8,12 +8,11 @@ The code is licensed under the LGPL V2.
 The collection contains:
 
 - ipc
-  collection of process interoperability
-  within and across sessions, in particular
+  collection of process interoperability across sessions,
+  in particular
   - locking
   - events
-  - in-session channels
-  - cross-session queues
+  - queues
 
 - unid
   unique identifiers

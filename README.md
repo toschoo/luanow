@@ -1,37 +1,37 @@
-# B+Tree Library "Beet"
+# Lua NoWDB Server Packages
 
+Collection of fundamental server-side Lua packages for the
+NoWDB database.
 
-The library is tested on Linux and should work
-on other systems as well. The tests use features
-only available on Linux (e.g. high resolution timers)
-and won't work on CygWin (and similar).
+The code is licensed under the LGPL V2.
 
-The code is licensed under the LGPL V3 with the exception
-that static linking is explicitly allowed 
-("static linking exception").
+The collection contains:
 
-The library comes with a GNU Makefile.
+- ipc
+  collection of process interoperability
+  within and across sessions, in particular
+  - locking
+  - events
+  - in-session channels
+  - cross-session queues
 
-- `make`
-  builds the library and tests
+- unid
+  unique identifiers
 
-- `make run`
-  runs the tests
+- recache
+  result caching library
 
-- `make all`
-   builds the library, tests and tools
+- state
+  maintain state in memory
 
-- `make debug`
-  like `make all` but in debug mode
+- numnow
+  vectors and matrices similar to numpy and pandas
 
-- `make tools`
-   builds the library and tools
+- stats
+  basic statistics
 
-- `make lib`
-  builds the library only
+- sampling
+  collection of statistical sampling methods
 
-- `make clean`
-  removes all binaries and object files
-
-- `. setenv.sh`
-  adds `./lib` to the `LD_LIBRARY_PATH`
+- feature
+  feature extraction and reduction

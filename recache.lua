@@ -40,8 +40,9 @@ end
 
 local function createrecacheid(nm)
   local stmt = [[create type nowsup_recacheid (
-                     id uint primary key,
-                     name text) if not exists]]
+                     id      uint primary key,
+                     name    text,
+                     created time) if not exists]]
   print(stmt)
   nowdb.execute_(stmt)
   -- insert new cacheid with name 'name' (not nm)
@@ -55,7 +56,7 @@ local function createprocdesc(nm)
   nowdb.execute_(stmt)
   stmt = [[create stamped edge nowsup_recacheid_proc (
              origin nowsup_recacheid,
-             destin nowsup_procdesc,
+             destin nowsup_nirvana,
              param  uint,
              ptype  uint,
              pvalue text) if not exists]]
@@ -104,19 +105,154 @@ function recache.drop(name)
   unid.drop(myid)
 end
 
-function recache.withcache(name, f, pars) 
-  print("withcache: ")
-  for i = 1, #pars do
-     print(string.format("%d: %s", i, pars[i]))
+local function paramsmatch(rid, created, pars)
+  print("origin : " .. tostring(rid))
+  print("created: " .. tostring(created))
+  local stmt = string.format(
+    [[select param, ptype, pvalue
+        from nowsup_recacheid_proc
+       where origin = %d
+         and stamp  = %d]], rid, created)
+  local candidates = {}
+  print(stmt)
+  local cur = nowdb.execute(stmt)
+  for row in cur.rows() do
+      local i = row.field(0)
+      if tostring(pars[i]) == row.field(2) then
+         if candidates[rid] == 0 then candidates[rid] = 1 end
+      elseif candidates[rid] == 1 then
+         candiates[rid] = 2 
+      end
   end
-  -- search in procd
-  -- if it exists:
-  -- return a cursor on result (select according to describe)
-  -- otherwise:
-  -- execute f
-  -- for each row in the result set:
-  -- insert into result
-  -- return cursor
+  cur.release()
+  for k, v in ipairs(candidates) do
+      if v == 1 then return k end
+  end
+end
+
+local function findcache(name, valid, f, pars)
+  local stmt = string.format(
+    [[select id, created from nowsup_recacheid
+       where name = '%s']], name)
+  print(stmt)
+  local cur = nowdb.execute(stmt)
+  for row in cur.rows() do
+     local rid = row.field(0)
+     print("RID: " .. tostring(rid))
+     if valid(rid) then
+        if paramsmatch(rid, row.field(1), pars) then
+           cur.release()
+           return rid
+        end
+     end
+  end
+end
+
+local function cachecursor(nm, rid)
+  local cur = nowdb.execute("describe " .. nm)
+  local fs = ''
+  local first = true
+  for row in cur.rows() do
+      local f = row.field(0)
+      print("describe " .. nm .. ": " .. f)
+      if f ~= 'origin' then
+         if not first then fs = fs .. ', ' else first = false end
+         fs = fs .. f
+      end
+  end
+  cur.release()
+  local stmt = string.format(
+    [[select %s from %s
+       where origin = %d]], fs, nm, rid)
+  print(stmt)
+  return nowdb.execute(stmt)
+end
+
+local function insertrid(name)
+  local myid = getunidname(name)
+  local rid = unid.get(myid)
+  local now = nowdb.getnow()
+  nowdb.execute_(string.format(
+    [[insert into nowsup_recacheid (id, name, created)
+      values (%d, '%s', %d)]], rid, name, now))
+  return rid, now
+end
+
+local function insertparams(rid, now, pars)
+  local ins =
+    [[insert into nowsup_recacheid_proc(
+        origin, destin, stamp, param, pvalue)
+      values (%d, 1, %d, %d, '%s')]]
+  for i = 1, #pars do
+     nowdb.execute_(string.format(ins, 
+      rid, now, i, tostring(pars[i])))
+  end
+end
+
+local function describeme(name)
+  local cur = nowdb.execute("describe " .. name)
+  local edge = {}
+  local i = 0
+  for row in cur.rows() do
+      i = i + 1
+      print("adding " .. i .. ": " .. row.field(0))
+      edge[i] = row.field(0)
+  end
+  cur.release()
+  return edge
+end
+
+local function getstmt(row)
+  local stmt = ''
+  for i = 1, row.countfields() do
+      local t, v = row.typedfield(i-1)
+      if t == nowdb.TEXT then
+         stmt = stmt .. ", '" .. v .. "'"
+      elseif t == nowdb.NOTHING then
+         stmt = stmt .. ", NULL"
+      else
+         stmt = stmt .. ", " .. tostring(v)
+      end
+  end
+  return stmt
+end
+
+local function generatecache(name, rid, now, co)
+  local nm = getedgename(name)
+  local edge = describeme(nm)
+  local ins = [[insert into %s (]] 
+  print("edge: " .. #edge)
+  for i = 1, #edge do
+    if i > 1 then ins = ins .. ', ' end
+    ins = ins .. edge[i]
+  end
+  ins = ins .. ') values (%d, 1, %d %s'
+  while true do
+     if coroutine.status(co) == 'dead' then break end
+     local _, row = coroutine.resume(co)
+     if not row then break end
+     local vals = getstmt(row)
+     vals = vals .. ')'
+     local stmt = string.format(ins, nm, rid, now, vals)
+     print(stmt)
+     nowdb.execute_(stmt)
+  end
+  return cachecursor(nm, rid)
+end
+
+local function fillcache(name, co, pars)
+  local rid, now = insertrid(name)
+  insertparams(rid, now, pars)
+  return generatecache(name, rid, now, co)
+end
+
+function recache.withcache(name, valid, co, pars) 
+  local nm = getedgename(name)
+  local rid = findcache(name, valid, co, pars)
+  if rid then 
+     return cachecursor(nm, rid)
+  end
+  return fillcache(name, co, pars)
 end
 
 return recache

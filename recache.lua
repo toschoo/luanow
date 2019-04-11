@@ -105,6 +105,9 @@ end
 -- name is the name of the new result cache,
 -- pld  is the payload descriptor, i.e.
 --      it describes the rows the result consists of
+--      the pld is an array of tables each of which
+--      has two keys: 'name' and 'type' describing
+--      the fields of the payload.
 ---------------------------------------------------------------------------
 function recache.create(name, pld)
   local nm = getedgename(name)
@@ -145,31 +148,31 @@ function recache.drop(name)
   nowdb.execute_(string.format([[drop edge %s if exists]], nm))
 end
 
--- create payload descriptor
--- create parameter state
-
 -- check if the parameters match
 local function paramsmatch(rid, created, pars)
   local stmt = string.format(
-    [[select param, ptype, pvalue
+    [[select param, pvalue
         from %s_proc
        where origin = %d
          and stamp  = %d]], RECACHETYPE, rid, created)
-  local candidates = {}
+  local candidate = 0
   if DBG then print(stmt) end
   local cur = nowdb.execute(stmt)
   for row in cur.rows() do
       local i = row.field(0)
-      if tostring(pars[i]) == row.field(2) then
-         if candidates[rid] == 0 then candidates[rid] = 1 end
-      elseif candidates[rid] == 1 then
-         candiates[rid] = 2 
+      local v = row.field(1)
+      -- consider using ptype
+      if (not v and not pars[i]) or
+         (tostring(pars[i]) == row.field(1))
+      then
+         if candidate == 0 then candidate = 1 end
+      else
+         candiate = 0
+         break
       end
   end
   cur.release()
-  for k, v in ipairs(candidates) do
-      if v == 1 then return k end
-  end
+  return (candidate == 1)
 end
 
 -- find valid resultcache with matching parameters
@@ -210,6 +213,7 @@ local function cachecursor(nm, rid)
       end
   end
   cur.release()
+
   local stmt = string.format(
     [[select %s from %s
        where origin = %d]], fs, nm, rid)
@@ -234,8 +238,10 @@ local function insertparams(rid, now, pars)
         origin, destin, stamp, param, pvalue)
       values (%d, 1, %d, %d, '%s')]]
   for i = 1, #pars do -- we could use ipairs here
-     nowdb.execute_(string.format(ins, RECACHETYPE,
-                    rid, now, i, tostring(pars[i])))
+     stmt = string.format(ins, RECACHETYPE,
+            rid, now, i, tostring(pars[i]))
+     if DBG then print(stmt) end
+     nowdb.execute_(stmt)
   end
 end
 
@@ -285,11 +291,8 @@ local function generatecache(name, rid, now, co)
   -- the final '%s' is the variable part (the values)
   ins = ins .. ') values (%d, 1, %d %s'
 
-  -- until the coroutine is dead
-  while true do
-     if coroutine.status(co) == 'dead' then break end
-     local _, row = coroutine.resume(co)
-     if not row then break end -- last step of the coroutine
+  -- iterate over the coroutine
+  for row in nowdb.corows(co) do
      local vals = getstmt(row) -- get the values 
      vals = vals .. ')'
      local stmt = string.format(ins, nm, rid, now, vals)
@@ -312,6 +315,20 @@ end
 -- or create a new cache entry consisting of
 -- the results produced by co
 -- the function returns a cursor on the result set
+-- the parameters are:
+-- - the name of the cache type
+-- - a function to evaluate if the the particular cache entry is valid.
+--   This function needs to accept the identifier of the cache entry.
+--   Some standard validators are provided below.
+-- - a coroutine that, per resume, produces one row
+--   to insert into the result cache; this row must comply to the
+--   payload descriptor provided to nowdb.create.
+-- - an array containing the parameter values with which
+--   the stored procedure was called, for instance,
+--   if the procedure is of the form:
+--   myproc(name text, lat float, lon float),
+--   a valid parameter setting may be:
+--   {'lisbon', 38.0, -8.0}
 ---------------------------------------------------------------------------
 function recache.withcache(name, valid, co, pars) 
   local nm = getedgename(name)
@@ -321,6 +338,58 @@ function recache.withcache(name, valid, co, pars)
   local rid = findcache(name, valid, pars)
   if rid then return cachecursor(nm, rid) end
   return fillcache(name, co, pars)
+end
+
+---------------------------------------------------------------------------
+-- Validator: always valid (no expiration)
+---------------------------------------------------------------------------
+function recache.isvalid()
+  return true
+end
+
+-- Validator: expires after period * unit 
+local function expires(rid, period, unit)
+  local created = nowdb.onevalue(string.format(
+    [[select created from %s where id = %d]], RECACHETYPE, rid))
+  local now = nowdb.getnow()
+  local xpr = created + period * unit
+  return (xpr > now)
+end
+
+---------------------------------------------------------------------------
+-- Returns a validator for caches that expire in several days
+---------------------------------------------------------------------------
+function recache.expiresindays(d)
+   return function(rid)
+      return expires(rid, d, nowdb.day)
+   end
+end
+
+---------------------------------------------------------------------------
+-- Returns a validator for caches that expire in several hour 
+---------------------------------------------------------------------------
+function recache.expiresinhours(d)
+   return function(rid)
+      return expires(rid, d, nowdb.hour)
+   end
+end
+
+---------------------------------------------------------------------------
+-- Returns a validator for caches that expire in several minutes
+---------------------------------------------------------------------------
+function recache.expiresinminutes(d)
+   return function(rid)
+      return expires(rid, d, nowdb.minute)
+   end
+end
+
+---------------------------------------------------------------------------
+-- Returns a validator for caches that expire in several seconds
+---------------------------------------------------------------------------
+function recache.expiresinseconds(d)
+   return function(rid)
+      return expires(rid, d, nowdb.second)
+   end
 end
 
 ---------------------------------------------------------------------------

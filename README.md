@@ -23,6 +23,9 @@ The collection contains:
 - state
   maintain state in memory
 
+- vcur
+  virtual cursors
+
 - numnow
   vectors and matrices similar to numpy and pandas
 

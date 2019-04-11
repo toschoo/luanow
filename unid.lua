@@ -38,10 +38,24 @@ local function getlockname(name)
   return string.format([[nowsup_unid_%s_lk]], name)
 end
 
+local function unidexists(nm)
+  local rc, cur = nowdb.pexecute('describe ' .. nm)
+  if rc == nowdb.OK then
+     cur.release()
+     return true
+  end
+  if rc == nowdb.KEYNOF then return false end
+  nowdb.raise(rc, cur)
+end
+
 function unid.create(name)
   local nm = getedgename(name)
   local lk = getlockname(name)
+
+  if unidexists(nm) then return end
+
   nowsupbase.create()
+  
   ipc.createlock(lk)
   nowdb.execute_([[create type nowsup_uniqueid (
                      id uint primary key,
@@ -53,7 +67,7 @@ function unid.create(name)
                                    comment text
                                  ) if not exists]], nm))
   math.randomseed(os.time())
-  local x = math.random(2^16, 2^31)
+  local x = math.random(2^8, 2^31)
   nowdb.execute_(string.format([[insert into nowsup_uniqueid (id, name)
                                         values  (%d, '%s')]], x, nm))
   nowdb.execute_(string.format([[insert into %s (origin, destin, stamp)
@@ -70,7 +84,7 @@ end
 local function uget(name)
   local nm = getedgename(name)
   local sql = string.format([[select max(origin) from %s]], nm)
-  local x = nowdb.execone(sql) + 1
+  local x = nowdb.onevalue(sql) + 1
   nowdb.execute_(string.format([[insert into %s (origin, destin, stamp)
                                         values  (%d, 1, now())]], nm, x))
   return x

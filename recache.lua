@@ -1,5 +1,5 @@
 ---------------------------------------------------------------------------
--- Lua NOWDB Stored Procedure Result Caching Library
+-- Lua NOWDB Stored Procedure Result Caching
 ---------------------------------------------------------------------------
  
 --------------------------------------
@@ -8,7 +8,7 @@
    
 -- This file is part of the NOWDB Stored Procedure Support Library.
 
--- It provides in particular result caches
+-- It provides in particular result caching
 
 -- The NOWDB Stored Procedure Support Library
 -- is free software; you can redistribute it
@@ -28,93 +28,135 @@
 ---------------------------------------------------------------------------
 local nowsupbase = require('nowsupbase')
 local unid = require('unid')
+
 local recache = {}
 
+---------------------------------------------------------------------------
+-- Result Cache consists
+-- ------------
+-- in a type that stores cacheids, which is named
+--    RECACHETYPE
+-- the primary key is a unique identifier named
+--    SEQ
+-- we further have the edge table
+--    RECACHETYPE_proc,
+-- which stores the parameter values with which
+-- a given resultset was created
+--
+-- Per cache an edge table named nowsup_recache_<name>
+-- (where <name> is the name of the result cache)
+-- is created. This table stores the effective results
+---------------------------------------------------------------------------
+local RECACHETYPE = 'nowsup_recacheid'
+local SEQ = 'recache'
+
+-- debug: print all statements
+local DBG = false
+
+---------------------------------------------------------------------------
+-- turn debug on/off
+---------------------------------------------------------------------------
+function recache.setDebug(t) DBG = t end
+
+-- Test whether the edge table for our cache exists
+local function edgeexists(nm)
+  rc, cur = nowdb.pexecute('describe ' .. nm)
+  if rc == nowdb.OK then
+     cur.release()
+     return true
+  end
+  if rc == nowdb.KEYNOF then return false end
+  nowdb.raise(rc, cur)
+end
+
+-- convert cache name to edge table name
 local function getedgename(name)
   return "nowsup_recache_" .. name
 end
 
-local function getunidname(name)
-  return "nowsup_recache_" .. name .. "_unid"
-end
-
+-- create cacheid table (if not exists)
 local function createrecacheid(nm)
-  local stmt = [[create type nowsup_recacheid (
-                     id      uint primary key,
-                     name    text,
-                     created time) if not exists]]
-  print(stmt)
+  local stmt = string.format(
+    [[create type %s (
+        id      uint primary key,
+        name    text,
+        created time) if not exists]], RECACHETYPE)
+  if DBG then print(stmt) end
   nowdb.execute_(stmt)
-  -- insert new cacheid with name 'name' (not nm)
 end
 
+-- create proc desc table (if not exists)
 local function createprocdesc(nm)
-  local stmt = [[create type nowsup_procdesc (
-                   procname text primary key,
-                   npars uint) if not exists]]
-  print(stmt)
-  nowdb.execute_(stmt)
-  stmt = [[create stamped edge nowsup_recacheid_proc (
-             origin nowsup_recacheid,
-             destin nowsup_nirvana,
-             param  uint,
-             ptype  uint,
-             pvalue text) if not exists]]
-  --[=[
-  local ins = string.format([[insert into nowdb_nowsup_recacheid_proc (
-                                   origin, destin, param, ptype, pvalue)
-                               values (%d, %s]], rid, procd['name'])
-  for i = 1, #procd['params'] do
-      local stmt = ins
-      stmt = stmt .. tostring(i) .. ', '
-                  .. procd['params'][i]['type']  .. ', '
-                  .. tostring(procd['params'][i]['value'] .. ')')
-  end
-  --]=]
-  print(stmt)
+  stmt = string.format(
+     [[create stamped edge %s_proc (
+         origin %s,
+         destin nowsup_nirvana,
+         param  uint,
+         ptype  uint,
+         pvalue text) if not exists]],
+     RECACHETYPE, RECACHETYPE)
+  if DBG then print(stmt) end
   nowdb.execute_(stmt)
 end
 
--- name, procname, parameter 1, 2, 3, ...
-function recache.create(name, procd, pld)
-  nowsupbase.create()
+---------------------------------------------------------------------------
+-- Create a new result cache
+-- -------------------------
+-- name is the name of the new result cache,
+-- pld  is the payload descriptor, i.e.
+--      it describes the rows the result consists of
+---------------------------------------------------------------------------
+function recache.create(name, pld)
   local nm = getedgename(name)
-  local myid = getunidname(name)
 
-  unid.create(myid) 
+  -- if this table exists, we are done
+  -- (or the whole thing is inconsistent)
+  if edgeexists(nm) then return end
+
+  -- create base stuff
+  nowsupbase.create()
+
+  print("CREATING CACHE")
+  unid.create(SEQ) 
   createrecacheid(nm)
   createprocdesc(nm)
   
-  local stmt = string.format([[create stamped edge %s (
-                                 origin nowsup_recacheid,
-                                 destin nowsup_anyuint]], nm)
+  -- create the edge table according to
+  -- the payload descriptor (pld)
+  local stmt = string.format(
+    [[create stamped edge %s (
+        origin %s,
+        destin nowsup_anyuint]], nm, RECACHETYPE)
   for i = 1, #pld do
       local p = pld[i]
-      stmt = stmt .. ',\n  ' .. p['name'] .. ' ' .. nowdb.nowtypename(p['type'])
+      stmt = stmt .. ',\n  ' .. p['name'] .. ' ' ..
+              nowdb.nowtypename(p['type'])
   end
   stmt = stmt .. ')'
-  print(stmt)
+  if DBG then print(stmt) end
   nowdb.execute_(stmt)
 end
 
+---------------------------------------------------------------------------
+-- Drop result cache
+---------------------------------------------------------------------------
 function recache.drop(name)
   local nm = getedgename(name)
-  local myid = getunidname(name)
-
   nowdb.execute_(string.format([[drop edge %s if exists]], nm))
-  unid.drop(myid)
 end
 
+-- create payload descriptor
+-- create parameter state
+
+-- check if the parameters match
 local function paramsmatch(rid, created, pars)
-  print("origin : " .. tostring(rid))
-  print("created: " .. tostring(created))
   local stmt = string.format(
     [[select param, ptype, pvalue
-        from nowsup_recacheid_proc
+        from %s_proc
        where origin = %d
-         and stamp  = %d]], rid, created)
+         and stamp  = %d]], RECACHETYPE, rid, created)
   local candidates = {}
-  print(stmt)
+  if DBG then print(stmt) end
   local cur = nowdb.execute(stmt)
   for row in cur.rows() do
       local i = row.field(0)
@@ -130,32 +172,39 @@ local function paramsmatch(rid, created, pars)
   end
 end
 
-local function findcache(name, valid, f, pars)
+-- find valid resultcache with matching parameters
+local function findcache(name, valid, pars)
   local stmt = string.format(
-    [[select id, created from nowsup_recacheid
-       where name = '%s']], name)
-  print(stmt)
+    [[select id, created from %s 
+       where name = '%s']], RECACHETYPE, name)
+  local _rid, _now = 0, 0
+  if DBG then print(stmt) end
   local cur = nowdb.execute(stmt)
   for row in cur.rows() do
      local rid = row.field(0)
-     print("RID: " .. tostring(rid))
+     local now = row.field(1)
      if valid(rid) then
-        if paramsmatch(rid, row.field(1), pars) then
-           cur.release()
-           return rid
+        if paramsmatch(rid, now, pars) then
+           if _now < now then -- select the latest
+              _rid, _now = rid, now 
+           end
         end
+     else
+       -- delete this entry
      end
   end
+  cur.release()
+  if _rid == 0 then return nil else return _rid end
 end
 
+-- create cursor on cached result
 local function cachecursor(nm, rid)
   local cur = nowdb.execute("describe " .. nm)
   local fs = ''
   local first = true
   for row in cur.rows() do
       local f = row.field(0)
-      print("describe " .. nm .. ": " .. f)
-      if f ~= 'origin' then
+      if f ~= 'origin' and f ~= 'destin' and f ~= 'stamp' then
          if not first then fs = fs .. ', ' else first = false end
          fs = fs .. f
       end
@@ -164,44 +213,48 @@ local function cachecursor(nm, rid)
   local stmt = string.format(
     [[select %s from %s
        where origin = %d]], fs, nm, rid)
-  print(stmt)
+  if DBG then print(stmt) end
   return nowdb.execute(stmt)
 end
 
+-- insert recache id
 local function insertrid(name)
-  local myid = getunidname(name)
-  local rid = unid.get(myid)
+  local rid = unid.get(SEQ)
   local now = nowdb.getnow()
   nowdb.execute_(string.format(
-    [[insert into nowsup_recacheid (id, name, created)
-      values (%d, '%s', %d)]], rid, name, now))
+    [[insert into %s (id, name, created)
+      values (%d, '%s', %d)]], RECACHETYPE, rid, name, now))
   return rid, now
 end
 
+-- insert parameter setting
 local function insertparams(rid, now, pars)
   local ins =
-    [[insert into nowsup_recacheid_proc(
+    [[insert into %s_proc(
         origin, destin, stamp, param, pvalue)
       values (%d, 1, %d, %d, '%s')]]
-  for i = 1, #pars do
-     nowdb.execute_(string.format(ins, 
-      rid, now, i, tostring(pars[i])))
+  for i = 1, #pars do -- we could use ipairs here
+     nowdb.execute_(string.format(ins, RECACHETYPE,
+                    rid, now, i, tostring(pars[i])))
   end
 end
 
-local function describeme(name)
-  local cur = nowdb.execute("describe " .. name)
+-- returns an array containing the fields of
+-- the recache edge table
+local function describeme(nm)
+  local cur = nowdb.execute("describe " .. nm)
   local edge = {}
   local i = 0
   for row in cur.rows() do
       i = i + 1
-      print("adding " .. i .. ": " .. row.field(0))
       edge[i] = row.field(0)
   end
   cur.release()
   return edge
 end
 
+-- creates the value part of the statement
+-- to insert the results into the cache table
 local function getstmt(row)
   local stmt = ''
   for i = 1, row.countfields() do
@@ -217,42 +270,60 @@ local function getstmt(row)
   return stmt
 end
 
+-- generate the cache results using the coroutine
+-- and insert them into the cache table
 local function generatecache(name, rid, now, co)
   local nm = getedgename(name)
   local edge = describeme(nm)
+  -- fixed part of the insert statement
   local ins = [[insert into %s (]] 
-  print("edge: " .. #edge)
-  for i = 1, #edge do
+  for i = 1, #edge do -- we could use ipairs here
     if i > 1 then ins = ins .. ', ' end
     ins = ins .. edge[i]
   end
+
+  -- the final '%s' is the variable part (the values)
   ins = ins .. ') values (%d, 1, %d %s'
+
+  -- until the coroutine is dead
   while true do
      if coroutine.status(co) == 'dead' then break end
      local _, row = coroutine.resume(co)
-     if not row then break end
-     local vals = getstmt(row)
+     if not row then break end -- last step of the coroutine
+     local vals = getstmt(row) -- get the values 
      vals = vals .. ')'
      local stmt = string.format(ins, nm, rid, now, vals)
-     print(stmt)
+     if DBG then print(stmt) end
      nowdb.execute_(stmt)
   end
   return cachecursor(nm, rid)
 end
 
+-- create a new cache line with parameter settings
+-- and generate the corresponding results
 local function fillcache(name, co, pars)
   local rid, now = insertrid(name)
   insertparams(rid, now, pars)
   return generatecache(name, rid, now, co)
 end
 
+---------------------------------------------------------------------------
+-- Use either existing and valid cache results
+-- or create a new cache entry consisting of
+-- the results produced by co
+-- the function returns a cursor on the result set
+---------------------------------------------------------------------------
 function recache.withcache(name, valid, co, pars) 
   local nm = getedgename(name)
-  local rid = findcache(name, valid, co, pars)
-  if rid then 
-     return cachecursor(nm, rid)
-  end
+  if not edgeexists(nm) then -- must exist
+     nowdb.raise(nowdb.KEYNOF, 'result cache does not exist')
+  end 
+  local rid = findcache(name, valid, pars)
+  if rid then return cachecursor(nm, rid) end
   return fillcache(name, co, pars)
 end
 
+---------------------------------------------------------------------------
+-- Return the package
+---------------------------------------------------------------------------
 return recache

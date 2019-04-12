@@ -32,9 +32,9 @@ local unid = require('unid')
 local recache = {}
 
 ---------------------------------------------------------------------------
--- Result Cache consists
+-- Result Cache consists in
 -- ------------
--- in a type that stores cacheids, which is named
+-- a type that stores cacheids, which is named
 --    RECACHETYPE
 -- the primary key is a unique identifier named
 --    SEQ
@@ -150,6 +150,7 @@ end
 
 -- check if the parameters match
 local function paramsmatch(rid, created, pars)
+  if not pars then return true end
   local stmt = string.format(
     [[select param, pvalue
         from %s_proc
@@ -233,6 +234,7 @@ end
 
 -- insert parameter setting
 local function insertparams(rid, now, pars)
+  if not pars then return nil end
   local ins =
     [[insert into %s_proc(
         origin, destin, stamp, param, pvalue)
@@ -316,21 +318,27 @@ end
 -- the results produced by co
 -- the function returns a cursor on the result set
 -- the parameters are:
--- - the name of the cache type
--- - a function to evaluate if the the particular cache entry is valid.
---   This function needs to accept the identifier of the cache entry.
---   Some standard validators are provided below.
--- - a coroutine that, per resume, produces one row
+
+-- + the name of the cache name
+
+-- + a coroutine that, per resume, produces one row
 --   to insert into the result cache; this row must comply to the
 --   payload descriptor provided to nowdb.create.
--- - an array containing the parameter values with which
+
+-- + a function to evaluate if the the particular cache entry is valid.
+--   This function needs to accept the identifier of the cache entry.
+--   Some standard validators are provided below.
+
+-- + an array containing the parameter values with which
 --   the stored procedure was called, for instance,
 --   if the procedure is of the form:
 --   myproc(name text, lat float, lon float),
 --   a valid parameter setting may be:
---   {'lisbon', 38.0, -8.0}
+--   {'lisbon', 38.0, -9.0}.
+--   If this array is nil, the cache entry
+--   will be valid for any combination of parameters.
 ---------------------------------------------------------------------------
-function recache.withcache(name, valid, co, pars) 
+function recache.withcache(name, co, valid, pars) 
   local nm = getedgename(name)
   if not edgeexists(nm) then -- must exist
      nowdb.raise(nowdb.KEYNOF, 'result cache does not exist')
@@ -341,10 +349,34 @@ function recache.withcache(name, valid, co, pars)
 end
 
 ---------------------------------------------------------------------------
+-- Equivalent to withcache(name, co, recache.valid),
+-- i.e. a cache that never expires and
+-- valid for all combinations of parameters
+---------------------------------------------------------------------------
+function recache.staticresult(name, co)
+  return recache.withcache(name, co, recache.valid)
+end
+
+---------------------------------------------------------------------------
+-- Equivalent to withcache(name, co, recache.invalid),
+-- i.e. a cache that expires immediately
+---------------------------------------------------------------------------
+function recache.tempresult(name, co)
+  return recache.withcache(name, co, recache.invalid)
+end
+
+---------------------------------------------------------------------------
 -- Validator: always valid (no expiration)
 ---------------------------------------------------------------------------
-function recache.isvalid()
+function recache.valid()
   return true
+end
+
+---------------------------------------------------------------------------
+-- Validator: never valid (expires immediately)
+---------------------------------------------------------------------------
+function recache.invalid()
+  return false
 end
 
 -- Validator: expires after period * unit 

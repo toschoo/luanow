@@ -8,7 +8,7 @@
    
 -- This file is part of the NOWDB Stored Procedure Support Library.
 
--- It provides in particular services for unique identifiers
+-- It provides in particular a generator of unique identifiers
 
 -- The NOWDB Stored Procedure Support Library
 -- is free software; you can redistribute it
@@ -30,14 +30,17 @@ local nowsupbase = require('nowsupbase')
 local ipc = require('ipc')
 local unid = {}
 
+-- get name of the edge that stores unique ids
 local function getedgename(name)
   return "nowsup_unid_" .. name
 end
 
+-- get name of the lock
 local function getlockname(name)
   return string.format([[nowsup_unid_%s_lk]], name)
 end
 
+-- check if unique id already exists
 local function unidexists(nm)
   local rc, cur = nowdb.pexecute('describe ' .. nm)
   if rc == nowdb.OK then
@@ -48,6 +51,9 @@ local function unidexists(nm)
   nowdb.raise(rc, cur)
 end
 
+---------------------------------------------------------------------------
+-- Create unique id generator
+---------------------------------------------------------------------------
 function unid.create(name)
   local nm = getedgename(name)
   local lk = getlockname(name)
@@ -74,6 +80,9 @@ function unid.create(name)
                                         values  (%d, 1, now())]], nm, x))
 end
 
+---------------------------------------------------------------------------
+-- Drop unique id generator
+---------------------------------------------------------------------------
 function unid.drop(name)
   local nm = getedgename(name)
   local lk = getlockname(name)
@@ -81,6 +90,7 @@ function unid.drop(name)
   ipc.droplock(lk)
 end
 
+-- The work horse: get the next unique id 
 local function uget(name)
   local nm = getedgename(name)
   local sql = string.format([[select max(origin) from %s]], nm)
@@ -90,9 +100,12 @@ local function uget(name)
   return x
 end
 
+---------------------------------------------------------------------------
+-- Get the next unique identifier
+---------------------------------------------------------------------------
 function unid.get(name)
   local lk = getlockname(name)
-  return ipc.withxlock(lk, uget, name)
+  return ipc.withxlock(lk, nil, uget, name)
 end
 
 return unid

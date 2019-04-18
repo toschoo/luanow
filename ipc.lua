@@ -32,16 +32,32 @@
 
 local ipc = {}
 
+---------------------------------------------------------------------------
+-- Create the lock named 'lk' (if it does not exist)
+---------------------------------------------------------------------------
 function ipc.createlock(lk)
   nowdb.execute_(string.format(
     [[create lock %s if not exists]], lk))
 end
 
+---------------------------------------------------------------------------
+-- Drop the lock named 'lk' (if it exists)
+---------------------------------------------------------------------------
 function ipc.droplock(lk)
   nowdb.execute_(string.format(
     [[drop lock %s if exists]], lk))
 end
 
+---------------------------------------------------------------------------
+-- Lock
+-- Parameters:
+-- lk  : name of the lock (string)
+-- mode: lock mode ('w' or nil for writing and 'r' for reading)
+-- tmo : timeout in milliseconds, nil means: no timeout
+-- Returns nowdb.OK on success,
+--         nowdb.TIMEOUT on timeout and
+--         raises an error otherwise
+---------------------------------------------------------------------------
 function ipc.lock(lk,mode,tmo)
   local modeclause = ''
   if not mode or mode == 'w' then
@@ -67,13 +83,22 @@ function ipc.lock(lk,mode,tmo)
   return nowdb.OK
 end
 
+---------------------------------------------------------------------------
+-- Unlock the lock named 'lk'
+-- Does not return anything, errors are raised
+---------------------------------------------------------------------------
 function ipc.unlock(lk)
   nowdb.execute_(string.format(
     [[unlock %s]], lk))
 end
 
-function ipc.withlock(lk, mode, f, ...)
-  local rc = ipc.lock(lk,mode)
+---------------------------------------------------------------------------
+-- Locks the lock named 'lk' in mode 'mode' with timeout 'tmo'
+-- executes the function 'f' whose arguments are given as '...'
+-- unlocks the lock even when 'f' raises an error
+---------------------------------------------------------------------------
+function ipc.withlock(lk, mode, tmo, f, ...)
+  local rc = ipc.lock(lk,mode,tmo)
   if rc ~= nowdb.OK then 
      nowdb.raise(rc, string.format("on locking %s", lk))
   end
@@ -83,8 +108,11 @@ function ipc.withlock(lk, mode, f, ...)
   return res
 end
 
-function ipc.withxlock(lk, f, ...)
-  return ipc.withlock(lk, 'w', f, ...)
+---------------------------------------------------------------------------
+-- Same as withlock, but always locks in mode 'w'
+---------------------------------------------------------------------------
+function ipc.withxlock(lk, tmo, f, ...)
+  return ipc.withlock(lk, 'w', tmo, f, ...)
 end
 
 return ipc

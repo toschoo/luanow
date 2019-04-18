@@ -319,7 +319,7 @@ end
 -- the function returns a cursor on the result set
 -- the parameters are:
 
--- + the name of the cache name
+-- + the cache name
 
 -- + a coroutine that, per resume, produces one row
 --   to insert into the result cache; this row must comply to the

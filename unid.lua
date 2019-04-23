@@ -72,7 +72,7 @@ function unid.create(name)
                                    destin nowsup_nirvana,
                                    comment text
                                  ) if not exists]], nm))
-  math.randomseed(os.time())
+  math.randomseed(nowdb.getnow())
   local x = math.random(2^8, 2^31)
   nowdb.execute_(string.format([[insert into nowsup_uniqueid (id, name)
                                         values  (%d, '%s')]], x, nm))

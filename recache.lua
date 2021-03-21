@@ -88,9 +88,10 @@ end
 -- create proc desc table (if not exists)
 local function createprocdesc(nm)
   stmt = string.format(
-     [[create stamped edge %s_proc (
-         origin %s,
-         destin nowsup_nirvana,
+     [[create edge %s_proc (
+         origin %s             origin,
+         destin nowsup_nirvana destin,
+         stamp  time            stamp,
          param  uint,
          ptype  uint,
          pvalue text) if not exists]],
@@ -127,9 +128,10 @@ function recache.create(name, pld)
   -- create the edge table according to
   -- the payload descriptor (pld)
   local stmt = string.format(
-    [[create stamped edge %s (
-        origin %s,
-        destin nowsup_anyuint]], nm, RECACHETYPE)
+    [[create edge %s (
+        origin %s origin,
+        destin nowsup_anyuint destin,
+        stamp  time stamp]], nm, RECACHETYPE)
   for i = 1, #pld do
       local p = pld[i]
       stmt = stmt .. ',\n  ' .. p['name'] .. ' ' ..

@@ -67,9 +67,10 @@ function unid.create(name)
                      id uint primary key,
                      name text) if not exists
                  ]])
-  nowdb.execute_(string.format([[create stamped edge %s (
-                                   origin nowsup_uniqueid,
-                                   destin nowsup_nirvana,
+  nowdb.execute_(string.format([[create edge %s (
+                                   origin nowsup_uniqueid origin,
+                                   destin nowsup_nirvana  destin,
+                                   stamp  time             stamp,
                                    comment text
                                  ) if not exists]], nm))
   math.randomseed(nowdb.getnow())

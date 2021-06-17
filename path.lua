@@ -37,7 +37,7 @@ local function nextgen(keys, edge, forward)
   end
 end
 
-function path.shortest(root, target, arc, it)
+local function shortestInDB(root, target, arc, it)
   local forward  = {}
   local backward = {}
   local fnextgen = {root}
@@ -47,7 +47,7 @@ function path.shortest(root, target, arc, it)
   local link = -1
 
   for i = 1, it do
-      print("iteration " .. i)
+      -- print("iteration " .. i)
       local tmp = {}
       for k, keys in chunker(fnextgen, path.CHUNKSZ) do
           local stmt = nextgen(keys, arc, true)
@@ -63,7 +63,6 @@ function path.shortest(root, target, arc, it)
                  forward[n] = {k}
 	      end
 	      if n == target then
-		 print("FOUND target!")
 	         link = n
 		 break
 	      end
@@ -80,7 +79,6 @@ function path.shortest(root, target, arc, it)
 	  end
 	  for k, _ in pairs(forward) do
               if backward[k] then
-		 print("FOUND forward!")
                  link = k
 		 break
 	      end
@@ -114,7 +112,6 @@ function path.shortest(root, target, arc, it)
 	  end
 	  for k, _ in pairs(forward) do
               if backward[k] then
-		 print("FOUND backward (" .. k .. "): " .. #backward[k])
                  link = k
 		 break
 	      end
@@ -126,14 +123,66 @@ function path.shortest(root, target, arc, it)
   return link, forward, backward
 end 
 
-function tshortest(root, target, link, it)
-  print("hello path!")
-  local link, f, b = path.shortest(root, target, link, it)
-  local ff = 0
-  local bb = 0
-  for _ in pairs(f) do ff = ff + 1 end
-  for _ in pairs(b) do bb = ff + 1 end
-  print("FOUND: " .. link .. " (" .. ff .. ", " .. bb .. ")")
+local function findPath(root, neighbours, graph, p, seen, it)
+  if it > 25 then return {} end
+  for _, k in pairs(neighbours) do
+      if not seen[k] then
+         seen[k] = true 
+         if k == root then return p end
+         p[#p+1] = k
+         rc = findPath(root, graph[k], graph, p, seen, it+1)
+         if rc then return rc end
+	 p[#p] = nil
+      end
+  end
+  return false
+end
+
+local function linkPaths(root, target, link, forward, backward)
+  if root == target then return {root} end
+  local p1 = {}
+  local p2 = {}
+  findPath(root  , forward[link] , forward , p1, {}, 0)
+  findPath(target, backward[link], backward, p2, {}, 0)
+  return p1, p2
+end
+
+local function joinPaths(root, p1, link, p2, target)
+  local r = {root}
+  for i = #p1, 1, -1 do
+      r[#r+1] = p1[i]
+  end
+  r[#r+1] = link
+  for _, v in pairs(p2) do
+      r[#r+1] = v
+  end
+  r[#r+1] = target
+  return r
+end
+
+local function showPath(mypath)
+  local p = ""
+  for i, v in pairs(mypath) do
+      if i > 1 then p = p .. " -> " end
+      p = p .. v
+  end
+  return p
+end
+
+local function mkTypes(r)
+  local vs = {}
+  for i, _ in pairs(r) do
+    vs[i] = nowdb.UINT
+  end
+  return vs
+end
+
+function shortest(root, target, link, it)
+  local l, f, b = shortestInDB(root, target, link, it)
+  local p1, p2 = linkPaths(root, target, l, f, b)
+  local r = joinPaths(root, p1, l, p2, target)
+  -- print(showPath(r))
+  return nowdb.array2row(mkTypes(r), r)
 end
 
 return path

@@ -53,7 +53,7 @@ local function fsearch(target, arc, nextGen, prevGen, forward, backward)
           forward[n] = {k}
        end
        if n == target then return n end
-       if not prevGen[n] then tmp[n] = true end
+       if not prevGen[n] then tmp[#tmp+1] = n end
      end
      cur.release()
      for _, k in pairs(nextGen) do
@@ -82,7 +82,7 @@ local function bsearch(target, arc, nextGen, prevGen, forward, backward)
           backward[k] = {n}
        end
        if k == target then return k end
-       if not prevGen[k] then tmp[k] = true end
+       if not prevGen[k] then tmp[#tmp+1] = k end
      end
      cur.release()
      for _, k in pairs(nextGen) do
@@ -103,17 +103,14 @@ local function shortestInDB(root, target, arc, it)
   local fprevgen = {}
   local bprevgen = {}
   local link = -1
-  local tmp = {}
 
   for i = 1, it do
       -- print("iteration " .. i)
-      link, tmp = fsearch(target, arc, fnextgen, fprevgen, forward, backward)
+      link, fnextgen = fsearch(target, arc, fnextgen, fprevgen, forward, backward)
       if link ~= -1 then break end
-      for k, _ in pairs(tmp) do fnextgen[#fnextgen+1] = k end
 
-      link, tmp = bsearch(root, arc, bnextgen, bprevgen, forward, backward)
+      link, bnextgen = bsearch(root, arc, bnextgen, bprevgen, forward, backward)
       if link ~= -1 then break end
-      for k, _ in pairs(tmp) do bnextgen[#bnextgen+1] = k end
   end
   return link, forward, backward
 end 

@@ -37,6 +37,64 @@ local function nextgen(keys, edge, forward)
   end
 end
 
+local function fsearch(target, arc, nextGen, prevGen, forward, backward)
+   local tmp = {}
+   for k, keys in chunker(nextGen, path.CHUNKSZ) do
+     local stmt = nextgen(keys, arc, true)
+     -- print(stmt)
+     local cur = nowdb.execute(stmt)
+     for row in cur.rows() do
+       -- print(row.field(0) .. " -> " .. row.field(1))
+       k = row.field(0)
+       n = row.field(1)
+       if forward[n] then
+          forward[n][#forward[n]+1] = k
+       else
+          forward[n] = {k}
+       end
+       if n == target then return n end
+       if not prevGen[n] then tmp[n] = true end
+     end
+     cur.release()
+     for _, k in pairs(nextGen) do
+         prevGen[k] = true
+     end
+     for k, _ in pairs(forward) do
+       if backward[k] then return k end
+     end
+   end
+   return -1, tmp
+end
+
+local function bsearch(target, arc, nextGen, prevGen, forward, backward)
+   local tmp = {}
+   for k, keys in chunker(nextGen, path.CHUNKSZ) do
+     local stmt = nextgen(keys, arc, false)
+     -- print(stmt)
+     local cur = nowdb.execute(stmt)
+     for row in cur.rows() do
+       -- print(row.field(0) .. " -> " .. row.field(1))
+       k = row.field(0)
+       n = row.field(1)
+       if backward[k] then
+          backward[k][#backward[k]+1] = n
+       else
+          backward[k] = {n}
+       end
+       if k == target then return k end
+       if not prevGen[k] then tmp[k] = true end
+     end
+     cur.release()
+     for _, k in pairs(nextGen) do
+         prevGen[k] = true
+     end
+     for k, _ in pairs(backward) do
+       if forward[k] then return k end
+     end
+   end
+   return -1, tmp
+end
+
 local function shortestInDB(root, target, arc, it)
   local forward  = {}
   local backward = {}
@@ -45,80 +103,17 @@ local function shortestInDB(root, target, arc, it)
   local fprevgen = {}
   local bprevgen = {}
   local link = -1
+  local tmp = {}
 
   for i = 1, it do
       -- print("iteration " .. i)
-      local tmp = {}
-      for k, keys in chunker(fnextgen, path.CHUNKSZ) do
-          local stmt = nextgen(keys, arc, true)
-          -- print(stmt)
-          local cur = nowdb.execute(stmt)
-          for row in cur.rows() do
-              -- print(row.field(0) .. " -> " .. row.field(1))
-	      k = row.field(0)
-	      n = row.field(1)
-	      if forward[n] then
-                 forward[n][#forward[n]+1] = k
-	      else
-                 forward[n] = {k}
-	      end
-	      if n == target then
-	         link = n
-		 break
-	      end
-	      if not fprevgen[n] then tmp[n] = true end
-          end
-          cur.release()
-	  if link ~= -1 then break end
-	  for _, k in pairs(fnextgen) do
-              fprevgen[k] = true
-          end
-	  fnextgen = {}
-	  for k, _ in pairs(tmp) do
-	      fnextgen[#fnextgen+1] = k
-	  end
-	  for k, _ in pairs(forward) do
-              if backward[k] then
-                 link = k
-		 break
-	      end
-          end
-	  if link ~= -1 then break end
-      end
-      local tmp = {}
-      for k, keys in chunker(bnextgen, path.CHUNKSZ) do
-          local stmt = nextgen(keys, arc, false)
-          -- print(stmt)
-          local cur = nowdb.execute(stmt)
-          for row in cur.rows() do
-              -- print(row.field(0) .. " <- " .. row.field(1))
-	      local k = row.field(0)
-	      local n = row.field(1)
-	      if backward[k] then
-                 backward[k][#backward[k]+1] = n
-	      else
-                 backward[k] = {n}
-	      end
-	      if not bprevgen[k] then tmp[k] = true end
-          end
-          cur.release()
-	  if link ~= -1 then break end
-	  for _, k in pairs(bnextgen) do
-              bprevgen[k] = true
-          end
-	  bnextgen = {}
-	  for k, _ in pairs(tmp) do
-	      bnextgen[#bnextgen+1] = k
-	  end
-	  for k, _ in pairs(forward) do
-              if backward[k] then
-                 link = k
-		 break
-	      end
-          end
-	  if link ~= -1 then break end
-      end
+      link, tmp = fsearch(target, arc, fnextgen, fprevgen, forward, backward)
       if link ~= -1 then break end
+      for k, _ in pairs(tmp) do fnextgen[#fnextgen+1] = k end
+
+      link, tmp = bsearch(root, arc, bnextgen, bprevgen, forward, backward)
+      if link ~= -1 then break end
+      for k, _ in pairs(tmp) do bnextgen[#bnextgen+1] = k end
   end
   return link, forward, backward
 end 

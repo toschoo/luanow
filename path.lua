@@ -134,8 +134,12 @@ local function linkPaths(root, target, link, forward, backward)
   if root == target then return {root} end
   local p1 = {}
   local p2 = {}
-  findPath(root  , forward[link] , forward , p1, {}, 0)
-  findPath(target, backward[link], backward, p2, {}, 0)
+  if forward and forward[link] then
+     findPath(root  , forward[link] , forward , p1, {}, 0)
+  end
+  if backward and backward[link] then
+     findPath(target, backward[link], backward, p2, {}, 0)
+  end
   return p1, p2
 end
 

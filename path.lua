@@ -39,14 +39,14 @@ end
 
 local function fsearch(target, arc, nextGen, prevGen, forward, backward)
    local tmp = {}
-   for k, keys in chunker(nextGen, path.CHUNKSZ) do
+   for _, keys in chunker(nextGen, path.CHUNKSZ) do
      local stmt = nextgen(keys, arc, true)
      -- print(stmt)
      local cur = nowdb.execute(stmt)
      for row in cur.rows() do
        -- print(row.field(0) .. " -> " .. row.field(1))
-       k = row.field(0)
-       n = row.field(1)
+       local k = row.field(0)
+       local n = row.field(1)
        if forward[n] then
           forward[n][#forward[n]+1] = k
        else
@@ -68,14 +68,14 @@ end
 
 local function bsearch(target, arc, nextGen, prevGen, forward, backward)
    local tmp = {}
-   for k, keys in chunker(nextGen, path.CHUNKSZ) do
+   for _, keys in chunker(nextGen, path.CHUNKSZ) do
      local stmt = nextgen(keys, arc, false)
      -- print(stmt)
      local cur = nowdb.execute(stmt)
      for row in cur.rows() do
        -- print(row.field(0) .. " -> " .. row.field(1))
-       k = row.field(0)
-       n = row.field(1)
+       local k = row.field(0)
+       local n = row.field(1)
        if backward[k] then
           backward[k][#backward[k]+1] = n
        else

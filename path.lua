@@ -1,7 +1,41 @@
+---------------------------------------------------------------------------
+-- Lua NOWDB Stored Procedure path finding and related functions
+---------------------------------------------------------------------------
+ 
+--------------------------------------
+-- (c) Tobias Schoofs, 2021
+--------------------------------------
+   
+-- This file is part of the NOWDB Stored Procedure Support Library.
+
+-- It provides in particular path finding and related services.
+
+-- The NOWDB Stored Procedure Support Library
+-- is free software; you can redistribute it
+-- and/or modify it under the terms of the GNU Lesser General Public
+-- License as published by the Free Software Foundation; either
+-- version 2.1 of the License, or (at your option) any later version.
+  
+-- The NOWDB Stored Procedure Support Library
+-- is distributed in the hope that it will be useful,
+-- but WITHOUT ANY WARRANTY; without even the implied warranty of
+-- MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+-- Lesser General Public License for more details.
+  
+-- You should have received a copy of the GNU Lesser General Public
+-- License along with the NOWDB CLIENT Library; if not, see
+-- <http://www.gnu.org/licenses/>.
+---------------------------------------------------------------------------
 local path = {}
 
+---------------------------------------------------------------------------
+-- Chunksize for creating SQL statements with large in list
+------------
+-- e.g.: select * from link where origin in (...)
+---------------------------------------------------------------------------
 path.CHUNKSZ = 100000
 
+-- Split a list into chunks of chunksz
 local function chunker(list, chunksz)
   return function(list,i)
     if i > #list then return nil end
@@ -14,6 +48,7 @@ local function chunker(list, chunksz)
   end, list, 1
 end
 
+-- Convert a string representing the list of an 'in' condition
 local function toinstr(keys)
   s = "("
   for i, k in pairs(keys) do
@@ -23,6 +58,13 @@ local function toinstr(keys)
   return s .. ")"
 end
 
+---------------------------------------------------------------------------
+-- Generate an SQL statement that selects the next or previous
+-- generation of nodes
+-- keys   : list of numeric keys to be converted to an 'in' condition
+-- edge   : the edge from which to select
+-- forward: boolean distinguishing forward and backward
+---------------------------------------------------------------------------
 local function nextgen(keys, edge, forward)
   if forward then
     return string.format(
@@ -37,6 +79,17 @@ local function nextgen(keys, edge, forward)
   end
 end
 
+---------------------------------------------------------------------------
+-- Search forward
+-- --------------
+-- target  : the target node
+-- arc     : the edge we are operating on
+-- nextGen : list of keys for the generation we are searching
+-- prevGen : dictionary key -> keys, the pervious generations
+--           (we don't want to search them)
+-- forward : list of keys searched forward, we add our results to this list
+-- backward: list of keys to check if we have found a link
+---------------------------------------------------------------------------
 local function fsearch(target, arc, nextGen, prevGen, forward, backward)
    local tmp = {}
    for _, keys in chunker(nextGen, path.CHUNKSZ) do
@@ -66,6 +119,12 @@ local function fsearch(target, arc, nextGen, prevGen, forward, backward)
    return -1, tmp
 end
 
+---------------------------------------------------------------------------
+-- Search backward
+-- ---------------
+-- The code is almost identical to fsearch.
+-- The two functions could be merged!
+---------------------------------------------------------------------------
 local function bsearch(target, arc, nextGen, prevGen, forward, backward)
    local tmp = {}
    for _, keys in chunker(nextGen, path.CHUNKSZ) do
@@ -95,6 +154,17 @@ local function bsearch(target, arc, nextGen, prevGen, forward, backward)
    return -1, tmp
 end
 
+---------------------------------------------------------------------------
+-- Database path finding
+-- ---------------------
+-- root  : The node we are starting with
+-- target: The node to which we search a path
+-- arc   : The edge we are following
+-- it    : The number of iterations
+-- We search in two directions, from root forward and from target backward.
+-- We stop when we found a node that appears in both directions or when
+-- the number of iterations has been reached. In this case we give up.
+---------------------------------------------------------------------------
 local function shortestInDB(root, target, arc, it)
   local forward  = {}
   local backward = {}
@@ -115,14 +185,23 @@ local function shortestInDB(root, target, arc, it)
   return link, forward, backward
 end 
 
-local function findPath(root, neighbours, graph, p, seen, it)
-  if it > 25 then return {} end
+---------------------------------------------------------------------------
+-- Find the path to 'root' starting with the list of neighbours.
+-- -----------------------
+-- root      : the node we are searching
+-- neighbours: The list of neighbours we are starting with
+-- graph     : dictionary keys -> neightbours
+-- seen      : dictiornary of nodes we already followed
+-- step      : current number of recursions (max 25)
+---------------------------------------------------------------------------
+local function findPath(root, neighbours, graph, p, seen, step)
+  if step > 25 then return {} end
   for _, k in pairs(neighbours) do
       if not seen[k] then
          seen[k] = true 
-         if k == root then return p end
+         if k == root then return true end
          p[#p+1] = k
-         rc = findPath(root, graph[k], graph, p, seen, it+1)
+         rc = findPath(root, graph[k], graph, p, seen, step+1)
          if rc then return rc end
 	 p[#p] = nil
       end
@@ -130,6 +209,14 @@ local function findPath(root, neighbours, graph, p, seen, it)
   return false
 end
 
+---------------------------------------------------------------------------
+-- Link two paths from which we know they are linked through node 'link'
+-----------------
+-- root    : starting node
+-- target  : end node
+-- forward : dictionary key -> neighbours from forward search
+-- backward: dictionary key -> neighbours from backward search
+---------------------------------------------------------------------------
 local function linkPaths(root, target, link, forward, backward)
   if root == target then return {root} end
   local p1 = {}
@@ -143,6 +230,15 @@ local function linkPaths(root, target, link, forward, backward)
   return p1, p2
 end
 
+---------------------------------------------------------------------------
+-- Join two paths at link starting with root ending with target
+-- --------------
+-- root  : the starting node
+-- p1    : first half of the path (in reversed order)
+-- link  : the link between the two paths
+-- p2    : second half of the path (in correct order)
+-- target: the end node
+---------------------------------------------------------------------------
 local function joinPaths(root, p1, link, p2, target)
   local r = {root}
   for i = #p1, 1, -1 do
@@ -156,6 +252,7 @@ local function joinPaths(root, p1, link, p2, target)
   return r
 end
 
+-- Convert a path to string (debugging) 
 local function showPath(mypath)
   local p = ""
   for i, v in pairs(mypath) do
@@ -165,6 +262,7 @@ local function showPath(mypath)
   return p
 end
 
+-- Generate type information for all node ids in r
 local function mkTypes(r)
   local vs = {}
   for i, _ in pairs(r) do
@@ -173,11 +271,18 @@ local function mkTypes(r)
   return vs
 end
 
-function shortest(root, target, link, it)
-  local l, f, b = shortestInDB(root, target, link, it)
+---------------------------------------------------------------------------
+-- Stored Procedure to find the hortest Path 
+--------------------------------------------
+-- root  : starting node
+-- target: end node
+-- edge  : name of the edge we want to search
+-- it    : number of iterations
+---------------------------------------------------------------------------
+function shortest(root, target, edge, it)
+  local l, f, b = shortestInDB(root, target, edge, it)
   local p1, p2 = linkPaths(root, target, l, f, b)
   local r = joinPaths(root, p1, l, p2, target)
-  -- print(showPath(r))
   return nowdb.array2row(mkTypes(r), r)
 end
 

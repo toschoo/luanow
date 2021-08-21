@@ -272,6 +272,39 @@ local function mkTypes(r)
 end
 
 ---------------------------------------------------------------------------
+-- Produces a list of n randomly selected node ids
+-- which appear as origin in 'edge';
+-- nodes with less than l or more than u appearances in 'edge'
+-- are ignored.
+-- This helper function should go to a sampling library.
+---------------------------------------------------------------------------
+local function randomNodes(edge, n, l, u)
+    local mx = 250*n
+    local res = {}
+    for i = 1, n do
+        res[#res+1] = i
+    end
+
+    math.randomseed(os.time())
+
+    local stmt = string.format(
+      [[select origin, count(*) from %s
+         group by origin]], edge)
+
+    local cur = nowdb.execute(stmt)
+    for row in cur.rows() do
+        local c = row.field(1)
+        if c >= l and c <= u then
+           local x = math.random(mx)
+           if x <= n then
+              res[x] = row.field(0)
+           end
+        end
+    end
+    return res, nil
+end
+
+---------------------------------------------------------------------------
 -- Stored Procedure to find the hortest Path 
 --------------------------------------------
 -- root  : starting node
@@ -284,6 +317,18 @@ function shortest(root, target, edge, it)
   local p1, p2 = linkPaths(root, target, l, f, b)
   local r = joinPaths(root, p1, l, p2, target)
   return nowdb.array2row(mkTypes(r), r)
+end
+
+function samplenodes(edge, n, l, u)
+  local res = randomNodes(edge, n, l, u)
+  if res then
+     local row = nowdb.makerow()
+     for _, v in pairs(mypath) do
+         row.add2row(nowdb.UINT, v)
+         row.closerow()
+     end
+     return row
+  end
 end
 
 return path

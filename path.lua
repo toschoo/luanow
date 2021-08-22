@@ -241,14 +241,18 @@ end
 ---------------------------------------------------------------------------
 local function joinPaths(root, p1, link, p2, target)
   local r = {root}
-  for i = #p1, 1, -1 do
+  for i = #p1, 1, -1 do -- reverse!
       r[#r+1] = p1[i]
   end
-  r[#r+1] = link
+  if link ~= root and link ~= -1 then
+     r[#r+1] = link
+  end
   for _, v in pairs(p2) do
       r[#r+1] = v
   end
-  r[#r+1] = target
+  if link ~= target then
+     r[#r+1] = target
+  end
   return r
 end
 
@@ -278,8 +282,8 @@ end
 -- are ignored.
 -- This helper function should go to a sampling library.
 ---------------------------------------------------------------------------
-local function randomNodes(edge, n, l, u)
-    local mx = 250*n
+local function randomNodes(edge, n, r, l, u)
+    local mx = r*n
     local res = {}
     for i = 1, n do
         res[#res+1] = i
@@ -291,11 +295,16 @@ local function randomNodes(edge, n, l, u)
       [[select origin, count(*) from %s
          group by origin]], edge)
 
+    local countme = 0
     local cur = nowdb.execute(stmt)
     for row in cur.rows() do
+	countme = countme + 1
         local c = row.field(1)
-        if c >= l and c <= u then
-           local x = math.random(mx)
+        if c > l and c < u then
+	   local x = countme
+	   if x > n then
+              x = math.random(mx)
+	   end
            if x <= n then
               res[x] = row.field(0)
            end
@@ -313,17 +322,40 @@ end
 -- it    : number of iterations
 ---------------------------------------------------------------------------
 function shortest(root, target, edge, it)
+  if root == target then
+     return nowdb.makeresult(nowdb.Uint, root)
+  end
   local l, f, b = shortestInDB(root, target, edge, it)
+  if l == -1 then
+     return nowdb.raise(nowdb.EOF, "no path found")	  
+  end
   local p1, p2 = linkPaths(root, target, l, f, b)
+  if not p1 then p1 = {} end -- why are they nil?
+  if not p2 then p2 = {} end
   local r = joinPaths(root, p1, l, p2, target)
+  if not r then
+     return nowdb.raise(nowdb.EOF, "no path found")	  
+  end
   return nowdb.array2row(mkTypes(r), r)
 end
 
-function samplenodes(edge, n, l, u)
-  local res = randomNodes(edge, n, l, u)
+---------------------------------------------------------------------------
+-- Stored Procedure to find samples of nodes
+-- that appear as origin in an edge
+-- (the function does not belong here,
+--  it should go to a stats package)
+--------------------------------------------
+-- edge  : name of the edge we want to search
+-- n     : number of samples we want
+-- r     : probability ratio (e.g.: 100 = 1 out of 100 is taken)
+-- l     : lower bound of appearances in edge (fewer is ignored)
+-- u     : upper bound of appearances in edge (more  is ignored)
+---------------------------------------------------------------------------
+function samplenodes(edge, n, r, l, u)
+  local res = randomNodes(edge, n, r, l, u)
   if res then
      local row = nowdb.makerow()
-     for _, v in pairs(mypath) do
+     for _, v in pairs(res) do
          row.add2row(nowdb.UINT, v)
          row.closerow()
      end

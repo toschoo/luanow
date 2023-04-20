@@ -1,7 +1,7 @@
 # Lua NoWDB Server Packages
 
 Collection of fundamental server-side Lua packages for the
-NoWDB database.
+[NoWDB](https://github.com/toschoo/nowdb) database.
 
 The code is licensed under the LGPL V2.
 
